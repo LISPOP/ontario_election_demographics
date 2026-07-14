@@ -1,0 +1,13 @@
+# R
+.Rhistory
+.RData
+.Rproj.user
+.Ruserdata
+*.Rproj.bak
+
+# macOS
+.DS_Store
+
+# Generated outputs (reproduced by running R_Scripts/3_merge_northern_non_northern_cpsr.R)
+data/ontario_demographics.csv
+data/ontario_election_demographics.csv
