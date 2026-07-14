@@ -19,15 +19,45 @@ fed_on %>%
 fed_on$FED<-str_sub(fed_on$ID, -5)
 names(on)
 head(on)
-#We want the federal ridings that are NOT among the 14 northern ridings.
-#Filtering by fed_code here would be unreliable - fed_code comes from a name-matched join in
-#1_data_import.R that is missing or wrong for several ridings (including some northern ones).
-#Instead we derive each federal riding's Elections Ontario ED_ID directly (last 3 digits of FED,
-#i.e. the "35" Ontario prefix stripped - see 2_get_northern_demographics_cpsr.R) and exclude the
-#ED_IDs already covered by the northern shapefile data (`northern$ED_ID`).
-fed_on %>%
-  mutate(ED_ID=as.numeric(str_sub(FED, -3))) %>%
-  filter(!ED_ID %in% northern$ED_ID)->non_northern_dguid
+#### Anchor on the ONTARIO provincial ridings ####
+#This project is about Ontario elections, so the Ontario provincial riding is the key throughout.
+#We want the federal electoral districts that correspond to the NON-northern provincial ridings.
+#
+#The provincial ridings adopted the 2015 (2013 Representation Order) federal boundaries, so each
+#non-northern provincial riding has a federal district with the SAME name. We therefore build a
+#name-based crosswalk from the provincial riding to its federal DGUID, and carry the provincial
+#ED_ID (Elections Ontario's ElectoralDistrictNumber) and name through to the demographics.
+#
+#This replaces the previous approach, which derived ED_ID from the federal riding NUMBER
+#(last 3 digits of FED). Federal and provincial ridings are both numbered alphabetically but over
+#different sets (121 federal vs 124 provincial), so the numbering drifts apart - e.g. Guelph is
+#provincial 33 but federal 35032 - and the old code silently attached each riding's demographics
+#to the wrong provincial riding.
+
+#Normalize names for matching: em/en dashes -> "--", collapse whitespace, upper case.
+norm_name <- function(x) str_trim(toupper(str_replace_all(str_replace_all(x, "—|–", "--"), "\\s+", " ")))
+
+#Non-northern provincial ridings, straight from the Elections Ontario shapefile (`ontario`,
+#built in 1_data_import.R; northern flag set from the named northern-riding list).
+prov_non_northern <- ontario %>%
+  st_drop_geometry() %>%
+  filter(northern == 0) %>%
+  distinct(ED_ID, ENGLISH_NA) %>%
+  mutate(name_key = norm_name(ENGLISH_NA))
+
+fed_on <- fed_on %>% mutate(name_key = norm_name(en))
+
+#Crosswalk: one row per non-northern provincial riding, carrying the matched federal DGUID (`ID`).
+#Federal northern ridings simply never match a non-northern provincial name, so they drop out here.
+non_northern_dguid <- prov_non_northern %>%
+  left_join(select(fed_on, name_key, ID, FED), by = "name_key")
+
+#Fail loudly rather than silently mis-merge if any provincial riding has no federal name match.
+.unmatched <- filter(non_northern_dguid, is.na(ID))
+if (nrow(.unmatched) > 0) {
+  stop("Non-northern provincial ridings with no federal name match:\n  ",
+       paste(.unmatched$ENGLISH_NA, collapse = "\n  "))
+}
 non_northern_dguid$ID
 #Look for income
 fed_on_meta %>% 
@@ -159,23 +189,14 @@ non_northern_data %>%
   mutate(FED=str_sub(DGUID, -5)) %>%
   rename(`Visible`=2, `Gini`=3, `Francophones`=4, `Unemployed`=5,`Not Labour Force`=6,`Density`=7, `Certificate`=8,`Age`=9, `Average Income`=10,Population=11)->non_northern_data
 
-#Elections Ontario's ED_ID (and ElectoralDistrictNumber in the election results) is just the
-#federal DGUID/FED code with the "35" (Ontario) province prefix stripped, since Ontario adopted
-#the federal boundaries in the 2013 redistribution. Deriving it this way avoids relying on the
-#name-matched `fed_code` join in 1_data_import.R, which is incomplete/unreliable for several ridings.
+#Attach the PROVINCIAL ED_ID and riding name via the name-based crosswalk built above, joining on
+#the federal DGUID (REF_AREA from the WDS pull == `ID` in the crosswalk). ED_ID is therefore
+#Elections Ontario's ElectoralDistrictNumber - the key used to merge back onto the election
+#results in 3_merge_northern_non_northern_cpsr.R - and Name is the provincial riding name, both
+#carried from the Ontario shapefile rather than re-derived from the federal riding number.
 non_northern_data %>%
-  mutate(ED_ID=as.numeric(str_sub(FED, -3)))->non_northern_data
-
-#Bring in the riding name for the non-northern ridings. Joining by ED_ID (rather than fed_code)
-#for the same reliability reason as above; fedcreate==2013 keeps this to the current boundaries,
-#matching the scope of the ED_ID join used downstream in 3_merge_northern_non_northern_cpsr.R.
-on %>%
-  filter(fedcreate==2013) %>%
-  distinct(ElectoralDistrictNumber, ElectoralDistrictName) ->on_names_2013
-
-non_northern_data %>%
-  left_join(on_names_2013, by=c("ED_ID"="ElectoralDistrictNumber")) %>%
-  rename(Name=ElectoralDistrictName)->non_northern_data
+  left_join(select(non_northern_dguid, ID, ED_ID, Name=ENGLISH_NA),
+            by=c("DGUID"="ID"))->non_northern_data
 
 #Combine with the northern demographics (built via the tongfen estimation in
 #2_get_northern_demographics_cpsr.R) into a single province-wide demographics table keyed on ED_ID.

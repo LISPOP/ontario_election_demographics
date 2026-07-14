@@ -23,15 +23,27 @@ on_demographics %>%
   write.csv(file=here("data/ontario_demographics.csv"), row.names=FALSE)
 
 #### Produce the final merged dataset: election results + demographics
-#Restricted to the 2018, 2022 and 2025 provincial elections, whose ElectoralDistrictNumber lines
-#up with on_demographics' ED_ID (the 2013 federal redistribution boundaries; see note above).
+#Restricted to the 2018, 2022 and 2025 provincial elections. on_demographics is keyed on the
+#Ontario provincial ED_ID (= Elections Ontario's ElectoralDistrictNumber): the northern rows carry
+#it from the shapefile, and the non-northern rows carry it via the name-based crosswalk in
+#2_get_non_northern_demographics_cpsr.R. So this is a provincial-to-provincial join.
 #`on` carries one row per candidate, so the merged table is candidate-level with the riding's
 #demographics attached.
 on %>%
   filter(Date %in% c(2018, 2022, 2025)) %>%
   left_join(on_demographics, by=c("ElectoralDistrictNumber"="ED_ID"))->on_voting_demographics_data
 
+#Ontario-centric coverage check: every 2018/2022/2025 riding must pick up demographics. If any
+#riding is missing, the merge key has drifted - stop rather than write a silently-wrong dataset.
+.missing_demo <- on_voting_demographics_data %>%
+  filter(is.na(Name)) %>%
+  distinct(ElectoralDistrictNumber, ElectoralDistrictName)
+if (nrow(.missing_demo) > 0) {
+  stop("Ridings with no demographics after merge:\n  ",
+       paste0(.missing_demo$ElectoralDistrictNumber, " ", .missing_demo$ElectoralDistrictName,
+              collapse = "\n  "))
+}
+
 #Write out the merged voting + demographics dataset (the deliverable for this project).
 write.csv(on_voting_demographics_data, file=here("data/ontario_election_demographics.csv"), row.names=FALSE)
-
 
