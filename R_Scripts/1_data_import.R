@@ -15,7 +15,8 @@ library(sf)
 library(rvest)
 library(cancensus)
 library(tongfen)
-#set_cancensus_api_key('', install=T)
+#Run this ONCE in the console (not committed) to store your key in ~/.Renviron:
+#set_cancensus_api_key('YOUR_CENSUSMAPPER_KEY', install=TRUE)
 #Run this command to be sure your cancensus api key has been set
 #show_cancensus_api_key()
 #To avoid difficulties with large file storage
